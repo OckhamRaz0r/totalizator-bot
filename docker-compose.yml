@@ -1,0 +1,20 @@
+version: '3.2'
+
+services:
+    santa-bot:
+      container_name: "totalizator-bot"
+      build:
+        context: .
+        dockerfile: Dockerfile
+      image: "totalizator-bot"
+      hostname: totalizator-bot
+      restart: always
+      networks:
+        - private
+      environment:
+        - DB_HOST=mongo-data
+        - DB_PORT=27017
+
+networks:
+  private:
+    external: true

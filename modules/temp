@@ -1,0 +1,596 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+from telegram import \
+    ReplyKeyboardRemove,\
+    Update
+
+from telegram.ext import \
+    Updater,\
+    CommandHandler,\
+    MessageHandler,\
+    Filters,\
+    ConversationHandler,\
+    CallbackContext
+
+from modules import LogHandler
+from pymongo import MongoClient
+
+import time
+import json
+import os
+
+# ENVIRONMENTS
+AUTH = json.load(open('./auth.json', 'r'))
+TOKEN = AUTH.get('TOKEN', '')
+ROOT = int(AUTH.get('ROOT', 0))
+ADMINS = list(int(_) for _ in AUTH.get('ADMINS', []))
+
+DB_HOST = os.environ.get('DB_HOST', "127.0.0.1")
+DB_PORT = int(os.environ.get('DB_PORT', 27017))
+AUTH_DB_NAME = os.environ.get('AUTH_DB_NAME', "")
+DATA_DB_NAME = os.environ.get('AUTH_DB_NAME', "")
+
+# MONGODB CONNECTION
+client = MongoClient(host=DB_HOST, port=DB_PORT)
+authDB = client[AUTH_DB_NAME]['users']
+users = client[DATA_DB_NAME]['users']
+
+# GLOBAL VARS
+SHUTDOWN = False
+
+# LOGGING
+logger = LogHandler()
+
+
+def error(update: Update, context: CallbackContext):
+    logger.error(context.error)
+
+
+# # KEYBOARD TEMPLATES
+# intro_menu = ReplyKeyboardMarkup(
+#     [[{'text': 'Подтвердить аккаунт',
+#        'request_contact': True}],
+#      ['До встречи!']],
+#     resize_keyboard=True
+# )
+#
+# main_menu = ReplyKeyboardMarkup(
+#     [['Любимые...', 'Идеальный подарок - это'],
+#      ['Как предпочитаю проводить время', 'До встречи!']],
+#     resize_keyboard=True
+# )
+#
+# favourites_menu = ReplyKeyboardMarkup(
+#     [['Фильм', 'Книга', 'Музыка'],
+#      ['Напиток', 'Цвет', 'Хобби'],
+#      ['Назад', 'До встречи!']],
+#     resize_keyboard=True
+# )
+#
+# submenu = ReplyKeyboardMarkup(
+#     [['Назад', 'До встречи!']],
+#     resize_keyboard=True
+# )
+#
+# thks_menu = ReplyKeyboardMarkup(
+#     [['Отблагодарить Санту']],
+#     resize_keyboard=True
+# )
+#
+# send_menu = ReplyKeyboardMarkup(
+#     [['До встречи!']],
+#     resize_keyboard=True
+# )
+#
+#
+# # ERROR HANDLING DECORATOR
+# def handle_errors(method):
+#     def error_wrapper(self, *args, **kwargs):
+#         result = ConversationHandler.END
+#         try:
+#             result = method(self, *args, **kwargs)
+#         except Exception as e:
+#             logger.error(e)
+#         return result
+#     return error_wrapper
+#
+#
+# @handle_errors
+# def typing_delay(chat_id, bot):
+#     bot.sendChatAction(chat_id=chat_id, action=ChatAction.TYPING)
+#     time.sleep(0.5)
+#
+#
+# @handle_errors
+# def facts_to_str(user_data):
+#     facts = list()
+#     if user_data:
+#         for key, value in user_data.items():
+#             facts.append(f'{key}: {value}')
+#     return "\n".join(facts).join(['\n', '\n'])
+#
+#
+#
+# ConversationHandler(
+#         entry_points=[
+#             CommandHandler('start', start),
+#             CommandHandler('reboot', reboot),
+#             CommandHandler('stats', stats),
+#             CommandHandler('notify', notify),
+#             CommandHandler('warning', warning),
+#             CommandHandler('shuffle', shuffle),
+#             MessageHandler(Filters.text, start)
+#         ],
+#
+#         states={
+#             PHONE: [
+#                 MessageHandler(Filters.contact, phone_confirmation),
+#                 MessageHandler(Filters.all, no_confirmation)
+#             ],
+#
+#             CHOOSING: [
+#                 MessageHandler(Filters.regex('^Любимые...$'), favourites_choice),
+#                 MessageHandler(Filters.regex('^(Идеальный подарок - это|'
+#                                              'Как предпочитаю проводить время)$'),
+#                                regular_choice),
+#                 MessageHandler(Filters.regex('^До встречи!$'), done),
+#             ],
+#
+#             FAVOURITES: [
+#                 MessageHandler(Filters.regex('^(Фильм|Книга|Музыка|Напиток|Цвет|Хобби)$'),
+#                                regular_choice),
+#                 MessageHandler(Filters.regex('^Назад$'), echo),
+#                 MessageHandler(Filters.regex('^До встречи!$'), done),
+#                 MessageHandler(Filters.all, favourites_choice),
+#             ],
+#
+#             CHOOSING_REPLY: [
+#                 MessageHandler(Filters.regex('^Назад$'), echo),
+#                 MessageHandler(Filters.regex('^До встречи!$'), done),
+#                 MessageHandler(Filters.text, received_information),
+#             ],
+#
+#             FAVOURITES_REPLY: [
+#                 MessageHandler(Filters.regex('^Назад$'), favourites_choice),
+#                 MessageHandler(Filters.regex('^До встречи!$'), done),
+#                 MessageHandler(Filters.text, favourites_information),
+#             ],
+#
+#             THKS: [
+#                 MessageHandler(Filters.regex('^Отблагодарить Санту$'), thks_santa),
+#                 MessageHandler(Filters.all, init),
+#             ],
+#
+#             SEND: [
+#                 MessageHandler(Filters.regex('^До встречи!$'), init),
+#                 MessageHandler(Filters.text, send_santa),
+#             ],
+#         },
+#         fallbacks=[
+#             MessageHandler(Filters.all, echo),
+#         ],
+#         per_chat=True,
+#     )
+#
+#
+#
+# @handle_errors
+# def init(update: Update, context: CallbackContext):
+#     update.message.reply_text(f"С наступающим Новым Годом!",
+#                               reply_markup=ReplyKeyboardRemove())
+#     return ConversationHandler.END
+#
+#
+# @handle_errors
+# def echo(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     context.user_data.pop('choice', None)
+#     if context.user_data:
+#         update.message.reply_text(f"Твой Тайный Санта узнает о тебе:\n"
+#                                   f"{facts_to_str(context.user_data)}\n"
+#                                   f"Ты можешь поделиться чем-то еще или что-либо поменять из уже сказанного.\n"
+#                                   f"Выбери, пожалуйста, один из пунктов меню.",
+#                                   reply_markup=main_menu)
+#     else:
+#         update.message.reply_text(f"Твоему Тайному Санте будет непросто выбрать подарок,"
+#                                   f" пока что он ничего о тебе не узнает..\n"
+#                                   f"Рассказажи ему немного о себе!\n"
+#                                   f"Выбери, пожалуйста, один из пунктов меню.",
+#                                   reply_markup=main_menu)
+#     return CHOOSING
+#
+#
+# @handle_errors
+# def start(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     context.user_data.pop('choice', None)
+#
+#     user = users.find_one({'chat_id': update.message.chat_id})
+#     if user:
+#         if user.get('new_friend_id'):
+#             for_whom_santa(context.bot, user)
+#             return THKS
+#
+#         if user.get('data'):
+#             for key, value in user['data'].items():
+#                 context.user_data[key] = value
+#
+#             update.message.reply_text(f"Привет, {user['first_name']}!\nТвой Тайный Санта узнает о тебе:\n"
+#                                       f"{facts_to_str(context.user_data)}\n"
+#                                       f"Ты можешь поделиться чем-то еще или что-либо поменять из уже сказанного.",
+#                                       reply_markup=main_menu)
+#         else:
+#             update.message.reply_text(f"Привет, {user['first_name']}!\nК сожалению, я ничего о тебе не знаю(\n"
+#                                       f"Рассказажи Тайному Санте немного о себе!",
+#                                       reply_markup=main_menu)
+#         return CHOOSING
+#
+#     update.message.reply_text(
+#         f"Привет! Я помогу тебе найти человека, который ждет твоего подарка. "
+#         f"Но для начала подтверди, пожалуйста, свой аккаунт",
+#         reply_markup=intro_menu)
+#
+#     return PHONE
+#
+#
+# @handle_errors
+# def phone_confirmation(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     logger.info(update.message.contact)
+#     phone = update.message.contact.phone_number
+#     phone = re.sub(r"[^\d]", "", phone)
+#
+#     user = users.find_one({'phones': phone})
+#
+#     if not user:
+#         update.message.reply_text(f"Извини, но твоего телефона нет среди тех, что указаны на нашем портале. "
+#                                   f"Попробуй зарегистрироваться через смартфон, если до этого использовал(а) десктопную"
+#                                   f" версию мессенждера. "
+#                                   f"Если все же не получается зарегистрироваться или"
+#                                   f" у тебя сменился номер телефона, сообщи об этом, пожалуйста, "
+#                                   f"по адресу income@group-ib.com",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#         return ConversationHandler.END
+#
+#     update.message.reply_text(
+#         f"Спасибо, {user['first_name']}! "
+#         f"А теперь помоги твоему Тайному Санте выбрать для тебя подарок, рассказав немного о себе.",
+#         reply_markup=main_menu
+#     )
+#
+#     data_update = {'$set': {'chat_id': update.message.chat_id}}
+#     users.update_one({'_id': user['_id']}, data_update, upsert=False)
+#
+#     return CHOOSING
+#
+#
+# @handle_errors
+# def no_confirmation(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     if update.message.text == 'До встречи!':
+#         typing_delay(update.message.chat_id, context.bot)
+#
+#         update.message.reply_text(f"До встречи в следующий раз!\n"
+#                                   f"С наступающим Новым Годом!",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#         return ConversationHandler.END
+#
+#     update.message.reply_text(
+#         f"Я помогу тебе найти человека, который ждет твоего подарка. "
+#         f"Но для начала подтверди, пожалуйста, свой аккаунт",
+#         reply_markup=intro_menu)
+#
+#     return PHONE
+#
+#
+# @handle_errors
+# def for_whom_santa(bot, user):
+#     if user and user['new_friend_id']:
+#         lucky_user = users.find_one({'chat_id': user['new_friend_id']})
+#
+#         if lucky_user:
+#             bot.send_message(chat_id=user['chat_id'],
+#                              text=f"Пусть тайное останется тайным!\n"
+#                                   f"Вот для кого ты стал(а) Тайным Сантой:\n"
+#                                   f"{lucky_user['last_name']} {lucky_user['first_name']}\n",
+#                              reply_markup=ReplyKeyboardRemove())
+#
+#             filename = f'{DATA_PATH}/photos/{lucky_user["email"]}.png'
+#             try:
+#                 bot.send_photo(chat_id=user['chat_id'], photo=open(filename, 'rb'))
+#             except Exception:
+#                 pass
+#
+#             if lucky_user['data']:
+#                 bot.send_message(chat_id=user['chat_id'],
+#                                  text=f"Вот, что я могу про него(нее) сказать:\n"
+#                                       f"{facts_to_str(lucky_user['data'])}\n"
+#                                       f"Удачи при выборе подарка!",
+#                                  reply_markup=thks_menu)
+#
+#             else:
+#                 bot.send_message(chat_id=user['chat_id'],
+#                                  text=f"Упс! Придется что-то придумывать, "
+#                                       f"я ничего не могу про него(нее) сказать\n"
+#                                       f"Удачи при выборе подарка!",
+#                                  reply_markup=thks_menu)
+#
+#             bot.send_photo(
+#                 chat_id=user['chat_id'],
+#                 photo=open(f'{DATA_PATH}/present.jpg', 'rb')
+#             )
+#
+#
+# @handle_errors
+# def favourites_choice(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     update.message.reply_text(f"Так-так.. Выбери один из пунктов меню и расскажи о том, "
+#                               f"что же ты любишь!",
+#                               reply_markup=favourites_menu
+#                               )
+#
+#     return FAVOURITES
+#
+#
+# @handle_errors
+# def regular_choice(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     text = update.message.text
+#
+#     if text in ['Фильм', 'Напиток', 'Цвет', ]:
+#         context.user_data['choice'] = 'Любимый ' + text.lower()
+#     elif text in ['Книга', 'Музыка', ]:
+#         context.user_data['choice'] = 'Любимая ' + text.lower()
+#     elif text in ['Хобби', ]:
+#         context.user_data['choice'] = 'Любимое ' + text.lower()
+#     else:
+#         context.user_data['choice'] = text
+#
+#     update.message.reply_text(f"\"{context.user_data['choice']}\"\n"
+#                               f"Ты говори-говори, я записываю..",
+#                               reply_markup=submenu)
+#
+#     if text in ['Фильм', 'Книга', 'Музыка', 'Напиток', 'Цвет', 'Хобби']:
+#         return FAVOURITES_REPLY
+#
+#     return CHOOSING_REPLY
+#
+#
+# @handle_errors
+# def received_information(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     category = context.user_data.pop('choice', None)
+#     if category is not None:
+#         context.user_data[category] = update.message.text
+#
+#     data_update = {'$set': {'data': context.user_data}}
+#     users.update_one({'chat_id': update.message.chat_id},
+#                      data_update,
+#                      upsert=False)
+#
+#     update.message.reply_text(f"Отлично! Вот, что узнает о тебе твой Тайный Санта:\n"
+#                               f"{facts_to_str(context.user_data)}\n"
+#                               f"Ты можешь поделиться чем-то еще или что-либо поменять из уже сказанного.",
+#                               reply_markup=main_menu)
+#
+#     return CHOOSING
+#
+#
+# @handle_errors
+# def favourites_information(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     category = context.user_data.pop('choice', None)
+#     if category is not None:
+#         context.user_data[category] = update.message.text
+#
+#     data_update = {'$set': {'data': context.user_data}}
+#     users.update_one({'chat_id': update.message.chat_id},
+#                      data_update,
+#                      upsert=False)
+#
+#     update.message.reply_text(f"Отлично! Вот, что узнает о тебе твой Тайный Санта:\n"
+#                               f"{facts_to_str(context.user_data)}\n"
+#                               f"Ты можешь поделиться чем-то еще или что-либо поменять из уже сказанного.",
+#                               reply_markup=favourites_menu)
+#
+#     return FAVOURITES
+#
+#
+# @handle_errors
+# def thks_santa(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     update.message.reply_text(f"Напиши и отправь Новогодние пожелания своему Тайному Санте",
+#                               reply_markup=send_menu)
+#
+#     return SEND
+#
+#
+# @handle_errors
+# def send_santa(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     user = users.find_one({'chat_id': update.message.chat_id})
+#     if user and user.get('my_santa_id'):
+#         context.bot.send_message(
+#             chat_id=user['my_santa_id'],
+#             text=f"{user['first_name']} отправил(а) тебе сообщение:\n\n{update.message.text}")
+#
+#         update.message.reply_text(f"Спасибо! Твое пожелание отправлено",
+#                                   reply_markup=ReplyKeyboardRemove())
+#     else:
+#         update.message.reply_text(f"Извини, но я не могу найти id твоего Санты. "
+#                                   f"Сообщи, пожалуйста, об этом на income@group-ib.com",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#     return ConversationHandler.END
+#
+#
+# @handle_errors
+# def done(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     context.user_data.pop('choice', None)
+#
+#     if context.user_data:
+#         update.message.reply_text(f"Твой Тайный Санта узнает о тебе:\n"
+#                                   f"{facts_to_str(context.user_data)}\n"
+#                                   f"До встречи в следующий раз!\n\n"
+#                                   f"Я напишу тебе, для кого ты станешь Тайным Сантой))\n"
+#                                   f"Если пропустишь оповещение - не страшно, сможешь позже у меня уточнить.\n\n"
+#                                   f"С наступающим Новым Годом!",
+#                                   reply_markup=ReplyKeyboardRemove())
+#     else:
+#         update.message.reply_text(f"К сожалению, я ничего о тебе не узнал(\n\n"
+#                                   f"До встречи в следующий раз!\n\n"
+#                                   f"Я напишу тебе, для кого ты станешь Тайным Сантой))\n"
+#                                   f"Если пропустишь оповещение - не страшно, сможешь позже у меня уточнить.\n\n"
+#                                   f"С наступающим Новым Годом!",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#     context.bot.send_photo(
+#         chat_id=update.message.chat_id,
+#         photo=open(f'{DATA_PATH}/santa.jpg', 'rb')
+#     )
+#
+#     data_update = {'$set': {'data': context.user_data}}
+#     users.update_one({'chat_id': update.message.chat_id},
+#                      data_update,
+#                      upsert=False)
+#
+#     context.user_data.clear()
+#     return ConversationHandler.END
+#
+#
+# @handle_errors
+# def reboot(update: Update, context: CallbackContext):
+#     global SHUTDOWN
+#
+#     if update.message.chat_id == ADMIN:
+#         update.message.reply_text(f"Rebooting..",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#         SHUTDOWN = True
+#
+#
+# @handle_errors
+# def stats(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     if update.message.chat_id == ADMIN:
+#         registered = users.count_documents({'chat_id': {'$ne': None}})
+#         no_data = users.count_documents({'chat_id': {'$ne': None}, 'data': {'$eq': None}}) + \
+#                   users.count_documents({'chat_id': {'$ne': None}, 'data': {'$eq': {}}})
+#         new_friend = users.count_documents({'new_friend_id': {'$ne': None}})
+#         my_santa = users.count_documents({'my_santa_id': {'$ne': None}})
+#         update.message.reply_text(f"registered: {registered}\n"
+#                                   f"no_data: {no_data}\n"
+#                                   f"new_friend: {new_friend}\n"
+#                                   f"my_santa: {my_santa}\n",
+#                                   reply_markup=ReplyKeyboardRemove())
+#
+#
+# @handle_errors
+# def notify(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#
+#     if update.message.chat_id == ADMIN:
+#         registered_users = users.find({'chat_id': {'$ne': None}})
+#
+#         for user in registered_users:
+#             if user['new_friend_id']:
+#                 for_whom_santa(context.bot, user)
+#
+#             time.sleep(0.5)
+#
+#         update.message.reply_text(f"Done!", reply_markup=ReplyKeyboardRemove())
+#
+#
+# @handle_errors
+# def warning(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     if update.message.chat_id == ADMIN:
+#         registered_users = users.find({'chat_id': {'$ne': None}})
+#
+#         for user in registered_users:
+#             context.bot.send_message(
+#                 chat_id=user['chat_id'],
+#                 text=f'Друзья, завтра утром каждый из Вас узнает для кого же стал Тайным Сантой)\n '
+#                      f'Осталось немного времени, чтобы проверить свои анкеты, '
+#                      f'и при необходимости внести в них изменения или дополнения.\n'
+#                      f'Хорошего вечера!')
+#
+#             time.sleep(0.1)
+#
+#         update.message.reply_text(f"Done!", reply_markup=ReplyKeyboardRemove())
+#
+#
+# @handle_errors
+# def shuffle(update: Update, context: CallbackContext):
+#     typing_delay(update.message.chat_id, context.bot)
+#     if update.message.chat_id == ADMIN:
+#         registered_users = users.find({'chat_id': {'$ne': None},
+#                                        'new_friend_id': {'$eq': None},
+#                                        'my_santa_id': {'$eq': None}})
+#
+#         registered_count = registered_users.count()
+#         update.message.reply_text(f"Registered users: {registered_count}",
+#                                   reply_markup=ReplyKeyboardRemove())
+#         # ALGORITHM
+#         if registered_count >= 2:
+#             queue = [user['chat_id'] for user in registered_users]
+#             random.shuffle(queue)
+#
+#             # Iterating over all users
+#             R = dict()
+#             first_cid = None
+#             prev_cid = None
+#             for cid in queue:
+#                 R[cid] = {'from': prev_cid, 'to': None}
+#                 if prev_cid is not None:
+#                     R[prev_cid]['to'] = cid
+#                 else:
+#                     first_cid = cid
+#                 prev_cid = cid
+#
+#             # Link between first and last users
+#             R[prev_cid]['to'] = first_cid
+#             R[first_cid]['from'] = prev_cid
+#
+#             cycles_count = 0
+#             success = True
+#
+#             # CHECKING RESULT
+#             for key in R.keys():
+#                 if R[key]['to'] is None:
+#                     success = False
+#
+#                 if R[key]['from'] is None:
+#                     success = False
+#
+#                 if R[key]['to'] == R[key]['from']:
+#                     success = False
+#                     cycles_count += 1
+#
+#             if not success:
+#                 update.message.reply_text(f"Something wrong!\n"
+#                                           f"Quantity of pairs: {cycles_count}",
+#                                           reply_markup=ReplyKeyboardRemove())
+#             else:
+#                 for key in R.keys():
+#                     data_update = {
+#                         '$set': {'new_friend_id': R[key]['to'],
+#                                  'my_santa_id': R[key]['from']}}
+#                     users.update_one({'chat_id': key},
+#                                      data_update,
+#                                      upsert=False)
+#                 update.message.reply_text(f"OK!")
+#
+#         else:
+#             update.message.reply_text(f"Not enough registered users!",
+#                                       reply_markup=ReplyKeyboardRemove())
